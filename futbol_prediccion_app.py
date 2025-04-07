@@ -13,8 +13,8 @@ st.title("⚽ Predicción con Datos Reales - API Football")
 st.markdown("Ingresa dos equipos reales y obtén estadísticas vivas directamente desde la API.")
 
 # Entrada de equipos
-team1 = st.text_input("🔵 Equipo Local", value="Bayern Munich")
-team2 = st.text_input("🔴 Equipo Visitante", value="Inter Milan")
+team1 = st.text_input("🔵 Equipo Local", value="Real Madrid")
+team2 = st.text_input("🔴 Equipo Visitante", value="Juventus")
 
 # Buscar equipo por nombre
 def buscar_equipo(nombre):
@@ -30,6 +30,8 @@ def obtener_forma(team_id):
     url = f"{BASE_URL}/fixtures?team={team_id}&last=5"
     r = requests.get(url, headers=headers)
     data = r.json()
+    if not data['response']:
+        return None
     goles_favor = 0
     goles_contra = 0
     ganados = 0
@@ -60,33 +62,39 @@ if team1 and team2:
         stats1 = obtener_forma(id1)
         stats2 = obtener_forma(id2)
 
-        df_stats = pd.DataFrame({
-            "Estadística": ["Goles a favor (prom)", "Goles en contra (prom)", "Partidos ganados (últimos 5)"],
-            name1: [round(stats1['prom_goles_favor'], 2), round(stats1['prom_goles_contra'], 2), stats1['partidos_ganados']],
-            name2: [round(stats2['prom_goles_favor'], 2), round(stats2['prom_goles_contra'], 2), stats2['partidos_ganados']],
-        })
+        if stats1 is None or stats2 is None:
+            st.warning("Uno o ambos equipos no tienen partidos recientes registrados en la API.")
+        else:
+            df_stats = pd.DataFrame({
+                "Estadística": ["Goles a favor (prom)", "Goles en contra (prom)", "Partidos ganados (últimos 5)"],
+                name1: [round(stats1['prom_goles_favor'], 2), round(stats1['prom_goles_contra'], 2), stats1['partidos_ganados']],
+                name2: [round(stats2['prom_goles_favor'], 2), round(stats2['prom_goles_contra'], 2), stats2['partidos_ganados']],
+            })
 
-        st.table(df_stats)
+            st.table(df_stats)
 
-        # Simple predicción probabilística
-        score1 = stats1['prom_goles_favor'] - stats1['prom_goles_contra'] + stats1['partidos_ganados']
-        score2 = stats2['prom_goles_favor'] - stats2['prom_goles_contra'] + stats2['partidos_ganados']
-        total = score1 + score2
-        empate = 0.15
-        prob1 = (score1 / total) * (1 - empate)
-        prob2 = (score2 / total) * (1 - empate)
-        prob_draw = empate
+            score1 = stats1['prom_goles_favor'] - stats1['prom_goles_contra'] + stats1['partidos_ganados']
+            score2 = stats2['prom_goles_favor'] - stats2['prom_goles_contra'] + stats2['partidos_ganados']
+            total = score1 + score2
 
-        df_pred = pd.DataFrame({
-            "Resultado": [f"Victoria {name1}", "Empate", f"Victoria {name2}"],
-            "Probabilidad (%)": [
-                round(prob1 * 100, 1),
-                round(prob_draw * 100, 1),
-                round(prob2 * 100, 1)
-            ]
-        })
+            if total == 0:
+                st.warning("No hay datos suficientes para generar una predicción.")
+            else:
+                empate = 0.15
+                prob1 = (score1 / total) * (1 - empate)
+                prob2 = (score2 / total) * (1 - empate)
+                prob_draw = empate
 
-        st.markdown("### 🔮 Predicción Probabilística")
-        st.table(df_pred)
+                df_pred = pd.DataFrame({
+                    "Resultado": [f"Victoria {name1}", "Empate", f"Victoria {name2}"],
+                    "Probabilidad (%)": [
+                        round(prob1 * 100, 1),
+                        round(prob_draw * 100, 1),
+                        round(prob2 * 100, 1)
+                    ]
+                })
+
+                st.markdown("### 🔮 Predicción Probabilística")
+                st.table(df_pred)
     else:
         st.error("No se encontraron uno o ambos equipos.")
