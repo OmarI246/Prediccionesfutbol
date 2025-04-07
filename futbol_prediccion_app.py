@@ -1,62 +1,90 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
 
 API_KEY = "05281534ec3871021494e7b97911409f"
 BASE_URL = "https://v3.football.api-sports.io"
-HEADERS = {"x-apisports-key": API_KEY}
 
-st.title("⚽ Predicción por Liga y Temporada")
-st.markdown("Selecciona un país, una liga y dos equipos para comparar sus datos reales.")
+headers = {
+    "x-apisports-key": API_KEY
+}
 
-# Detectar temporada actual automáticamente
-def temporada_actual():
-    hoy = datetime.today()
-    return hoy.year if hoy.month >= 8 else hoy.year - 1
+# Países europeos con ligas populares
+paises_europa = [
+    "Spain", "England", "Italy", "Germany", "France", "Portugal",
+    "Netherlands", "Belgium", "Turkey", "Switzerland", "Austria"
+]
 
-TEMPORADA = temporada_actual()
-st.markdown(f"📅 Temporada detectada automáticamente: **{TEMPORADA}**")
+st.title("🌍 Predicción por Liga y Temporada - Europa")
+st.markdown("Selecciona un país europeo, una liga activa y dos equipos para comparar sus datos reales.")
 
-# Obtener lista de países
-@st.cache_data
-def obtener_paises():
-    url = f"{BASE_URL}/countries"
-    res = requests.get(url, headers=HEADERS).json()
-    return sorted([c["name"] for c in res["response"]])
+# Obtener temporada actual desde API
+def obtener_temporada_actual():
+    url = f"{BASE_URL}/leagues"
+    r = requests.get(url, headers=headers)
+    data = r.json()
+    if data['response']:
+        return data['response'][0]['seasons'][-1]['year']
+    return 2024
 
-# Obtener ligas por país
+temporada = obtener_temporada_actual()
+st.info(f"📅 Temporada detectada automáticamente: {temporada}")
+
+# Seleccionar país
+pais = st.selectbox("🌐 Selecciona un país europeo", paises_europa)
+
+# Obtener ligas del país
 def obtener_ligas(pais):
-    url = f"{BASE_URL}/leagues?country={pais}"
-    res = requests.get(url, headers=HEADERS).json()
+    url = f"{BASE_URL}/leagues?country={pais}&season={temporada}"
+    r = requests.get(url, headers=headers)
+    data = r.json()
     ligas = []
-    for l in res["response"]:
-        nombre = l["league"]["name"]
-        id_liga = l["league"]["id"]
-        if l["seasons"]:
-            temporadas = [t["year"] for t in l["seasons"]]
-            if TEMPORADA in temporadas:
-                ligas.append((nombre, id_liga))
+    for l in data['response']:
+        ligas.append({
+            "nombre": l['league']['name'],
+            "id": l['league']['id']
+        })
     return ligas
 
-# Obtener equipos en la liga
-def obtener_equipos(league_id):
-    url = f"{BASE_URL}/teams?league={league_id}&season={TEMPORADA}"
-    res = requests.get(url, headers=HEADERS).json()
-    return {t["team"]["name"]: t["team"]["id"] for t in res["response"]}
+ligas = obtener_ligas(pais)
+liga_nombres = [l['nombre'] for l in ligas]
+liga_seleccionada = st.selectbox("🏆 Selecciona una liga", liga_nombres)
 
-# Obtener forma reciente
-def obtener_forma(team_id, league_id):
-    url = f"{BASE_URL}/fixtures?team={team_id}&season={TEMPORADA}&league={league_id}"
-    r = requests.get(url, headers=HEADERS)
+liga_id = next((l['id'] for l in ligas if l['nombre'] == liga_seleccionada), None)
+
+# Obtener equipos por liga y temporada
+def obtener_equipos(liga_id):
+    url = f"{BASE_URL}/teams?league={liga_id}&season={temporada}"
+    r = requests.get(url, headers=headers)
     data = r.json()
-    partidos = data['response'][-5:]  # últimos 5
-    if not partidos:
+    equipos = []
+    for e in data['response']:
+        equipos.append({
+            "id": e['team']['id'],
+            "nombre": e['team']['name']
+        })
+    return equipos
+
+equipos = obtener_equipos(liga_id)
+nombres_equipos = [e['nombre'] for e in equipos]
+
+equipo1 = st.selectbox("🔵 Equipo Local", nombres_equipos)
+equipo2 = st.selectbox("🔴 Equipo Visitante", nombres_equipos)
+
+id1 = next((e['id'] for e in equipos if e['nombre'] == equipo1), None)
+id2 = next((e['id'] for e in equipos if e['nombre'] == equipo2), None)
+
+# Obtener datos de forma
+def obtener_forma(team_id):
+    url = f"{BASE_URL}/fixtures?team={team_id}&last=5"
+    r = requests.get(url, headers=headers)
+    data = r.json()
+    if not data['response']:
         return None
     goles_favor = 0
     goles_contra = 0
     ganados = 0
-    for match in partidos:
+    for match in data['response']:
         if match['teams']['home']['id'] == team_id:
             goles_favor += match['goals']['home']
             goles_contra += match['goals']['away']
@@ -73,30 +101,13 @@ def obtener_forma(team_id, league_id):
         "partidos_ganados": ganados
     }
 
-# UI país → liga → equipos
-pais = st.selectbox("🌍 Selecciona un país", obtener_paises())
+if equipo1 != equipo2:
+    stats1 = obtener_forma(id1)
+    stats2 = obtener_forma(id2)
 
-ligas_disponibles = obtener_ligas(pais)
-liga_nombre = st.selectbox("🏆 Selecciona una liga", [l[0] for l in ligas_disponibles])
-liga_id = [l[1] for l in ligas_disponibles if l[0] == liga_nombre][0]
+    if stats1 and stats2:
+        st.subheader(f"📊 Estadísticas comparativas: {equipo1} vs {equipo2}")
 
-equipos = obtener_equipos(liga_id)
-equipo1 = st.selectbox("🔵 Equipo Local", list(equipos.keys()))
-equipo2 = st.selectbox("🔴 Equipo Visitante", list(equipos.keys()), index=1 if len(equipos) > 1 else 0)
-
-# Ejecutar análisis
-if equipo1 and equipo2 and equipo1 != equipo2:
-    id1 = equipos[equipo1]
-    id2 = equipos[equipo2]
-
-    st.subheader(f"📊 Estadísticas: {equipo1} vs {equipo2} ({liga_nombre} {TEMPORADA})")
-
-    stats1 = obtener_forma(id1, liga_id)
-    stats2 = obtener_forma(id2, liga_id)
-
-    if stats1 is None or stats2 is None:
-        st.warning("Uno o ambos equipos no tienen partidos recientes registrados.")
-    else:
         df_stats = pd.DataFrame({
             "Estadística": ["Goles a favor (prom)", "Goles en contra (prom)", "Partidos ganados (últimos 5)"],
             equipo1: [round(stats1['prom_goles_favor'], 2), round(stats1['prom_goles_contra'], 2), stats1['partidos_ganados']],
@@ -105,6 +116,7 @@ if equipo1 and equipo2 and equipo1 != equipo2:
 
         st.table(df_stats)
 
+        # Cálculo de predicción
         score1 = stats1['prom_goles_favor'] - stats1['prom_goles_contra'] + stats1['partidos_ganados']
         score2 = stats2['prom_goles_favor'] - stats2['prom_goles_contra'] + stats2['partidos_ganados']
         total = score1 + score2
@@ -128,5 +140,7 @@ if equipo1 and equipo2 and equipo1 != equipo2:
 
             st.markdown("### 🔮 Predicción Probabilística")
             st.table(df_pred)
+    else:
+        st.warning("Uno de los equipos no tiene datos recientes disponibles.")
 else:
     st.info("Selecciona dos equipos diferentes para continuar.")
