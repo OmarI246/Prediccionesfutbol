@@ -1,75 +1,92 @@
 import streamlit as st
 import pandas as pd
+import requests
 
-# Datos simulados de equipos
-equipos_data = {
-    "Bayern de Múnich":        [9.0, 8.5, 9.0, 5.0, 6.0, 8.5],
-    "Inter de Milán":          [8.0, 7.0, 6.5, 6.0, 8.5, 7.0],
-    "Manchester City":         [9.5, 9.0, 9.0, 4.5, 9.0, 9.0],
-    "Real Madrid":             [9.0, 9.0, 8.5, 4.0, 8.5, 9.0],
-    "Boca Juniors":            [6.5, 6.0, 7.5, 6.0, 6.5, 6.0],
-    "Cruz Azul":               [6.0, 5.5, 6.0, 6.5, 6.0, 5.5]
+API_KEY = "05281534ec3871021494e7b97911409f"
+BASE_URL = "https://v3.football.api-sports.io"
+
+headers = {
+    "x-apisports-key": API_KEY
 }
 
-# Encabezados de los factores
-factores = ["Forma reciente", "Historial directo", "Condición de local", "Lesiones y ausencias", "Defensa del rival", "Cuotas de apuestas"]
-ponderaciones = [0.2, 0.15, 0.2, 0.1, 0.15, 0.2]
+st.title("⚽ Predicción con Datos Reales - API Football")
+st.markdown("Ingresa dos equipos reales y obtén estadísticas vivas directamente desde la API.")
 
-# Título e instrucciones
-st.title("⚽ Predicción de Partidos de Fútbol - Nivel 2")
-st.markdown("Compara dos equipos y genera predicciones basadas en datos dinámicos simulados.")
+# Entrada de equipos
+team1 = st.text_input("🔵 Equipo Local", value="Bayern Munich")
+team2 = st.text_input("🔴 Equipo Visitante", value="Inter Milan")
 
-# Entradas de usuario
-equipo_local = st.text_input("🔵 Equipo Local", value="Bayern de Múnich")
-equipo_visitante = st.text_input("🔴 Equipo Visitante", value="Inter de Milán")
+# Buscar equipo por nombre
+def buscar_equipo(nombre):
+    url = f"{BASE_URL}/teams?search={nombre}"
+    r = requests.get(url, headers=headers)
+    data = r.json()
+    if data['response']:
+        return data['response'][0]['team']['id'], data['response'][0]['team']['name']
+    return None, nombre
 
-if equipo_local and equipo_visitante:
-    # Obtener datos de los equipos
-    datos_local = equipos_data.get(equipo_local, [6.0]*6)
-    datos_visitante = equipos_data.get(equipo_visitante, [6.0]*6)
+# Obtener últimos partidos
+def obtener_forma(team_id):
+    url = f"{BASE_URL}/fixtures?team={team_id}&last=5"
+    r = requests.get(url, headers=headers)
+    data = r.json()
+    goles_favor = 0
+    goles_contra = 0
+    ganados = 0
+    for match in data['response']:
+        if match['teams']['home']['id'] == team_id:
+            goles_favor += match['goals']['home']
+            goles_contra += match['goals']['away']
+            if match['teams']['home']['winner']:
+                ganados += 1
+        else:
+            goles_favor += match['goals']['away']
+            goles_contra += match['goals']['home']
+            if match['teams']['away']['winner']:
+                ganados += 1
+    return {
+        "prom_goles_favor": goles_favor / 5,
+        "prom_goles_contra": goles_contra / 5,
+        "partidos_ganados": ganados
+    }
 
-    # Crear DataFrame comparativo
-    df = pd.DataFrame({
-        "Factor": factores,
-        equipo_local: datos_local,
-        equipo_visitante: datos_visitante,
-        "Ponderación": ponderaciones
-    })
+if team1 and team2:
+    id1, name1 = buscar_equipo(team1)
+    id2, name2 = buscar_equipo(team2)
 
-    # Calcular score ponderado
-    df["Score " + equipo_local] = df[equipo_local] * df["Ponderación"]
-    df["Score " + equipo_visitante] = df[equipo_visitante] * df["Ponderación"]
-    score_local = df["Score " + equipo_local].sum()
-    score_visitante = df["Score " + equipo_visitante].sum()
+    if id1 and id2:
+        st.subheader(f"📊 Estadísticas: {name1} vs {name2}")
 
-    st.markdown("### 📊 Comparativa de Factores")
-    st.dataframe(df[["Factor", equipo_local, equipo_visitante]])
+        stats1 = obtener_forma(id1)
+        stats2 = obtener_forma(id2)
 
-    # Calcular predicción
-    total = score_local + score_visitante
-    empate = 0.15
-    prob_local = (score_local / total) * (1 - empate)
-    prob_visitante = (score_visitante / total) * (1 - empate)
-    prob_empate = empate
+        df_stats = pd.DataFrame({
+            "Estadística": ["Goles a favor (prom)", "Goles en contra (prom)", "Partidos ganados (últimos 5)"],
+            name1: [round(stats1['prom_goles_favor'], 2), round(stats1['prom_goles_contra'], 2), stats1['partidos_ganados']],
+            name2: [round(stats2['prom_goles_favor'], 2), round(stats2['prom_goles_contra'], 2), stats2['partidos_ganados']],
+        })
 
-    st.markdown("### 🔮 Predicción del Resultado")
-    pred_df = pd.DataFrame({
-        "Resultado": [f"Victoria {equipo_local}", "Empate", f"Victoria {equipo_visitante}"],
-        "Probabilidad (%)": [
-            round(prob_local * 100, 1),
-            round(prob_empate * 100, 1),
-            round(prob_visitante * 100, 1)
-        ]
-    })
-    st.table(pred_df)
+        st.table(df_stats)
 
-    # Recomendación
-    if prob_local > prob_visitante:
-        st.success(f"📌 {equipo_local} tiene una ventaja en este enfrentamiento.")
-    elif prob_visitante > prob_local:
-        st.success(f"📌 {equipo_visitante} parece más fuerte en los datos.")
+        # Simple predicción probabilística
+        score1 = stats1['prom_goles_favor'] - stats1['prom_goles_contra'] + stats1['partidos_ganados']
+        score2 = stats2['prom_goles_favor'] - stats2['prom_goles_contra'] + stats2['partidos_ganados']
+        total = score1 + score2
+        empate = 0.15
+        prob1 = (score1 / total) * (1 - empate)
+        prob2 = (score2 / total) * (1 - empate)
+        prob_draw = empate
+
+        df_pred = pd.DataFrame({
+            "Resultado": [f"Victoria {name1}", "Empate", f"Victoria {name2}"],
+            "Probabilidad (%)": [
+                round(prob1 * 100, 1),
+                round(prob_draw * 100, 1),
+                round(prob2 * 100, 1)
+            ]
+        })
+
+        st.markdown("### 🔮 Predicción Probabilística")
+        st.table(df_pred)
     else:
-        st.info("📌 ¡Partido muy parejo! Podría ser empate.")
-
-else:
-    st.warning("Por favor, ingresa ambos equipos para comenzar el análisis.")
+        st.error("No se encontraron uno o ambos equipos.")
