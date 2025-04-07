@@ -9,14 +9,16 @@ headers = {
     "x-apisports-key": API_KEY
 }
 
-st.title("⚽ Predicción con Datos Reales - API Football")
-st.markdown("Ingresa dos equipos reales y obtén estadísticas vivas directamente desde la API.")
+st.title("⚽ Predicción con Datos Reales - Liga Específica")
+st.markdown("Comparación de equipos usando datos reales de la Champions League 2023.")
 
-# Entrada de equipos
+# Fijar temporada y liga (Champions League 2023)
+SEASON = 2023
+LEAGUE_ID = 2  # Champions League ID en API-Football
+
 team1 = st.text_input("🔵 Equipo Local", value="Real Madrid")
 team2 = st.text_input("🔴 Equipo Visitante", value="Juventus")
 
-# Buscar equipo por nombre
 def buscar_equipo(nombre):
     url = f"{BASE_URL}/teams?search={nombre}"
     r = requests.get(url, headers=headers)
@@ -25,17 +27,17 @@ def buscar_equipo(nombre):
         return data['response'][0]['team']['id'], data['response'][0]['team']['name']
     return None, nombre
 
-# Obtener últimos partidos
 def obtener_forma(team_id):
-    url = f"{BASE_URL}/fixtures?team={team_id}&last=5"
+    url = f"{BASE_URL}/fixtures?team={team_id}&season={SEASON}&league={LEAGUE_ID}"
     r = requests.get(url, headers=headers)
     data = r.json()
-    if not data['response']:
+    partidos = data['response'][-5:]  # Tomamos los últimos 5
+    if not partidos:
         return None
     goles_favor = 0
     goles_contra = 0
     ganados = 0
-    for match in data['response']:
+    for match in partidos:
         if match['teams']['home']['id'] == team_id:
             goles_favor += match['goals']['home']
             goles_contra += match['goals']['away']
@@ -57,13 +59,13 @@ if team1 and team2:
     id2, name2 = buscar_equipo(team2)
 
     if id1 and id2:
-        st.subheader(f"📊 Estadísticas: {name1} vs {name2}")
+        st.subheader(f"📊 Estadísticas: {name1} vs {name2} (Champions League {SEASON})")
 
         stats1 = obtener_forma(id1)
         stats2 = obtener_forma(id2)
 
         if stats1 is None or stats2 is None:
-            st.warning("Uno o ambos equipos no tienen partidos recientes registrados en la API.")
+            st.warning("Uno o ambos equipos no tienen partidos recientes en esta liga y temporada.")
         else:
             df_stats = pd.DataFrame({
                 "Estadística": ["Goles a favor (prom)", "Goles en contra (prom)", "Partidos ganados (últimos 5)"],
